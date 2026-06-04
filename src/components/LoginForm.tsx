@@ -27,8 +27,16 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
     setIsLoading(true);
 
     const cleanUser = username.trim();
-    if (cleanUser !== 'Admin' || password !== 'Ideatrg@3305') {
-      setError('Invalid username or password. Please verify your administrative credentials.');
+    let assignedRole: 'admin' | 'manager' | null = null;
+
+    if (cleanUser === 'Admin' && password === 'Ideatrg@3305') {
+      assignedRole = 'admin';
+    } else if (cleanUser === 'amhrd' && password === 'amhrd@2026') {
+      assignedRole = 'manager';
+    }
+
+    if (!assignedRole) {
+      setError('Invalid username or password. Please verify your portal credentials.');
       setIsLoading(false);
       return;
     }
@@ -37,11 +45,13 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
       // Seed database if empty so there is rich content instantly
       await seedDatabaseIfNeeded();
       localStorage.setItem('isLoggedIn', 'true');
+      localStorage.setItem('userRole', assignedRole);
       onLoginSuccess();
     } catch (err: any) {
       console.error('[Database Seed Error]:', err);
       // Even if seed fails due to some transient error, allow entering and show status
       localStorage.setItem('isLoggedIn', 'true');
+      localStorage.setItem('userRole', assignedRole);
       onLoginSuccess();
     } finally {
       setIsLoading(false);
@@ -63,9 +73,9 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
             <div className="w-12 h-12 bg-indigo-500/10 text-indigo-400 rounded-xl flex items-center justify-center border border-indigo-500/20 mb-3 shadow-[0_0_15px_rgba(99,102,241,0.15)]">
               <ShieldCheck className="w-6 h-6" />
             </div>
-            <h3 className="text-lg font-extrabold text-white tracking-tight">TrainLogic Admin</h3>
+            <h3 className="text-lg font-extrabold text-white tracking-tight">TrainLogic Portal</h3>
             <p className="text-slate-400 text-xs mt-1.5 max-w-xs mx-auto leading-relaxed">
-              Sign in with your administrative credentials to manage training records.
+              Sign in with your credentials to access and manage training records.
             </p>
           </div>
         </div>

@@ -4,7 +4,7 @@
  */
 
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
-import { collection, doc, setDoc, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
 import { TrainingRecord, UploadBatch, CustomHeader } from '../types';
 
 // Seed initial data to showcase beautiful dashboard on initial load using the user's domain style!
@@ -107,8 +107,9 @@ export const MOCK_HEADERS: CustomHeader[] = [
  */
 export async function seedDatabaseIfNeeded(): Promise<void> {
   try {
-    const snapshot = await getDocs(collection(db, 'records'));
-    if (snapshot.empty) {
+    const sentinelRef = doc(db, 'batches', 'seed_sentinel');
+    const sentinelSnap = await getDoc(sentinelRef);
+    if (!sentinelSnap.exists()) {
       console.log('[Firestore]: Seeding mock dataset...');
       for (const rec of MOCK_RECORDS) {
         await setDoc(doc(db, 'records', rec.id), rec);
@@ -127,6 +128,17 @@ export async function seedDatabaseIfNeeded(): Promise<void> {
           email: currentAdmin.email
         });
       }
+
+      // Assert a dynamic tracking sentinel in batches collection to prevent downstream reseeding
+      const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      await setDoc(sentinelRef, {
+        id: 'seed_sentinel',
+        filename: 'System Seed Sentinel',
+        uploadedAt: nowStr,
+        recordsCount: 0,
+        status: 'Success',
+        remarks: 'Sentinel prevents automatic database reseeding if users clear all training records.'
+      });
     }
   } catch (error) {
     console.error('Failed to seed Database records:', error);
@@ -253,17 +265,32 @@ export async function mergeUploadedRecords(
   const mergedList = [...existing];
 
   for (const raw of newRecords) {
+    // Align/trace new entries with existing historical employees by name or employee ID to cluster records under a single profile
+    const existingProfile = existing.find(
+      (r) =>
+        (raw.employeeName && r.employeeName && r.employeeName.trim().toUpperCase() === raw.employeeName.trim().toUpperCase()) ||
+        (raw.employeeId && r.employeeId && r.employeeId.trim().toUpperCase() === raw.employeeId.trim().toUpperCase())
+    );
+
+    const alignedRecord = { ...raw };
+    if (existingProfile) {
+      if (!alignedRecord.employeeId && existingProfile.employeeId) alignedRecord.employeeId = existingProfile.employeeId;
+      if (!alignedRecord.employeeName && existingProfile.employeeName) alignedRecord.employeeName = existingProfile.employeeName;
+      if (!alignedRecord.department && existingProfile.department) alignedRecord.department = existingProfile.department;
+      if (!alignedRecord.rank && existingProfile.rank) alignedRecord.rank = existingProfile.rank;
+    }
+
     // Check key match with complete null/undefined string protection
     const duplicateIndex = mergedList.findIndex(
       (r) =>
-        (r?.employeeId || '').trim().toUpperCase() === (raw?.employeeId || '').trim().toUpperCase() &&
-        (r?.trainingTitle || '').trim().toUpperCase() === (raw?.trainingTitle || '').trim().toUpperCase()
+        (r?.employeeId || '').trim().toUpperCase() === (alignedRecord?.employeeId || '').trim().toUpperCase() &&
+        (r?.trainingTitle || '').trim().toUpperCase() === (alignedRecord?.trainingTitle || '').trim().toUpperCase()
     );
 
     const recordId = duplicateIndex >= 0 ? mergedList[duplicateIndex].id : `tr-${Math.random().toString(36).substr(2, 9)}`;
 
     const completeRecord = cleanUndefined<TrainingRecord>({
-      ...raw,
+      ...alignedRecord,
       id: recordId,
       uploadedAt: nowStr,
       uploadBatchId: batchId,

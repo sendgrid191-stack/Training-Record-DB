@@ -20,6 +20,7 @@ import {
   Check,
   Settings,
   Grid3X3,
+  User,
 } from 'lucide-react';
 import { TrainingRecord, CustomHeader } from '../types';
 
@@ -32,6 +33,7 @@ interface TrainingTableProps {
   onDeleteRecords: (ids: string[]) => Promise<any>;
   onAddCustomHeader: (name: string, type: 'string' | 'number' | 'boolean') => Promise<any>;
   onDeleteCustomHeader: (id: string) => Promise<any>;
+  userRole?: 'admin' | 'manager';
 }
 
 export default function TrainingTable({
@@ -43,7 +45,11 @@ export default function TrainingTable({
   onDeleteRecords,
   onAddCustomHeader,
   onDeleteCustomHeader,
+  userRole = 'admin',
 }: TrainingTableProps) {
+  const isReadOnly = userRole === 'manager';
+  const [isGroupedByEmployee, setIsGroupedByEmployee] = useState(false);
+
   // Queries and Filters States
   const [search, setSearch] = useState('');
   const [selectedDept, setSelectedDept] = useState('');
@@ -146,12 +152,53 @@ export default function TrainingTable({
     return filteredRecords.slice(startIdx, startIdx + itemsPerPage);
   }, [filteredRecords, currentPage, itemsPerPage]);
 
+  // Group filtered records by employeeId / employeeName for collectively displaying employee training activities
+  const groupedByEmployee = useMemo(() => {
+    const groups: Record<string, {
+      id: string;
+      employeeId: string;
+      employeeName: string;
+      department: string;
+      rank: string;
+      records: TrainingRecord[];
+    }> = {};
+
+    filteredRecords.forEach((r) => {
+      const idKey = (r.employeeId || '').trim().toUpperCase();
+      const nameKey = (r.employeeName || '').trim().toUpperCase();
+      const groupingKey = idKey || nameKey || 'UNKNOWN';
+
+      if (!groups[groupingKey]) {
+        groups[groupingKey] = {
+          id: groupingKey,
+          employeeId: r.employeeId || 'N/A',
+          employeeName: r.employeeName || 'N/A',
+          department: r.department || 'N/A',
+          rank: r.rank || 'N/A',
+          records: [],
+        };
+      }
+      groups[groupingKey].records.push(r);
+    });
+
+    return Object.values(groups);
+  }, [filteredRecords]);
+
+  const totalGroupPages = Math.ceil(groupedByEmployee.length / itemsPerPage);
+
+  const paginatedGroups = useMemo(() => {
+    const startIdx = (currentPage - 1) * itemsPerPage;
+    return groupedByEmployee.slice(startIdx, startIdx + itemsPerPage);
+  }, [groupedByEmployee, currentPage, itemsPerPage]);
+
+  const activeTotalPages = isGroupedByEmployee ? totalGroupPages : totalPages;
+
   // Prevent pagination index overflow when list shrinks
   React.useEffect(() => {
-    if (currentPage > totalPages && totalPages > 0) {
-      setCurrentPage(totalPages);
+    if (currentPage > activeTotalPages && activeTotalPages > 0) {
+      setCurrentPage(activeTotalPages);
     }
-  }, [totalPages, currentPage]);
+  }, [activeTotalPages, currentPage]);
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
@@ -336,18 +383,38 @@ export default function TrainingTable({
 
           {/* Action buttons (Manual Entry & Export) */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Dynamic Customizable Columns Control */}
+            {/* View Mode Toggle: Group by Employee */}
             <button
-              onClick={() => setShowHeadersModal(true)}
-              className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/85 font-semibold text-xs py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Add or remove training record dynamic headers"
-              id="manage-custom-headers-btn"
+              onClick={() => {
+                setIsGroupedByEmployee(!isGroupedByEmployee);
+                setCurrentPage(1);
+              }}
+              className={`font-semibold text-xs py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer border ${
+                isGroupedByEmployee
+                  ? 'bg-indigo-600 text-indigo-600 text-white hover:bg-indigo-700 shadow-xs'
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+              }`}
+              id="group-by-employee-toggle-btn"
+              title="Click to cluster training sessions collectively by employee profiles"
             >
-              <Grid3X3 className="w-3.5 h-3.5 text-slate-500" />
-              Manage Columns
+              <User className="w-3.5 h-3.5" />
+              <span>{isGroupedByEmployee ? 'Grouped by Employee' : 'Standard List View'}</span>
             </button>
 
-            {selectedRows.length > 0 ? (
+            {/* Dynamic Customizable Columns Control */}
+            {!isReadOnly && (
+              <button
+                onClick={() => setShowHeadersModal(true)}
+                className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/85 font-semibold text-xs py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Add or remove training record dynamic headers"
+                id="manage-custom-headers-btn"
+              >
+                <Grid3X3 className="w-3.5 h-3.5 text-slate-500" />
+                Manage Columns
+              </button>
+            )}
+
+            {selectedRows.length > 0 && !isReadOnly ? (
               <>
                 <button
                   onClick={() => exportToExcelFormat(true)}
@@ -402,14 +469,16 @@ export default function TrainingTable({
               </button>
             )}
 
-            <button
-              onClick={openAddModal}
-              className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-1.5 px-3 rounded-lg flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
-              id="add-manual-record-btn"
-            >
-              <Plus className="w-3.5 h-3.5 animate-bounce" />
-              Add Record
-            </button>
+            {!isReadOnly && (
+              <button
+                onClick={openAddModal}
+                className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-1.5 px-3 rounded-lg flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                id="add-manual-record-btn"
+              >
+                <Plus className="w-3.5 h-3.5 animate-bounce" />
+                Add Record
+              </button>
+            )}
           </div>
         </div>
 
@@ -480,175 +549,344 @@ export default function TrainingTable({
         </div>
       </div>
 
-      {/* Database Master Training Records Table Grid */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-[11px] border-collapse" id="master-training-table-element">
-          <thead className="bg-slate-50/70 text-slate-500 border-b border-slate-200/60 font-semibold">
-            <tr className="divide-x divide-slate-100/40">
-              <th className="px-3 py-2 text-center w-8">
-                <input
-                  type="checkbox"
-                  onChange={handleSelectAll}
-                  checked={paginatedRecords.length > 0 && paginatedRecords.every((r) => selectedRows.includes(r.id))}
-                  className="rounded-sm border-slate-300 text-slate-900 focus:ring-slate-900 w-3.5 h-3.5"
-                />
-              </th>
-              <th className="px-2 py-2 font-bold w-12 text-center">S No</th>
-              <th className="px-2 py-2 w-14">Rank</th>
-              <th className="px-3 py-2 w-28">Employee ID</th>
-              <th className="px-3 py-2 w-32">Employee Name</th>
-              <th className="px-3 py-2 w-24">Department</th>
-              <th className="px-3 py-2 max-w-[250px]">Training Title</th>
-              <th className="px-3 py-2 w-24">Category</th>
-              <th className="px-3 py-2 w-20 text-center">Status</th>
+      {/* Database Master Training Records View Container */}
+      {isGroupedByEmployee ? (
+        <div className="p-4 space-y-4" id="grouped-employees-portfolios">
+          {paginatedGroups.length === 0 ? (
+            <div className="py-12 bg-white text-center rounded-xl border border-dashed border-slate-200">
+              <SlidersHorizontal className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+              <h4 className="text-slate-650 font-bold text-xs">No employees found matching filter criteria</h4>
+              <p className="text-[10px] text-slate-400 mt-1">Try resetting search filters or upload spreadsheet logs.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {paginatedGroups.map((group) => {
+                // Compute summary statistics for this specific employee
+                const total = group.records.length;
+                const passed = group.records.filter((r) => r.status?.trim().toLowerCase() === 'pass' || r.status?.trim().toLowerCase() === 'completed').length;
+                const failed = group.records.filter((r) => r.status?.trim().toLowerCase() === 'fail' || r.status?.trim().toLowerCase() === 'failed').length;
+                const withdrawn = group.records.filter((r) => r.status?.trim().toLowerCase() === 'withdrawn').length;
 
-              {/* Dynamic Added Customizable Column Headers */}
-              {customHeaders.map((ch) => (
-                <th key={ch.id} className="px-3 py-2 text-slate-600 italic bg-yellow-50/20 max-w-[120px] truncate" title={ch.name}>
-                  {ch.name}
-                </th>
-              ))}
+                return (
+                  <div
+                    key={group.id}
+                    className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden"
+                    id={`employee-portfolio-${group.employeeId}`}
+                  >
+                    {/* Compact Card Header */}
+                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-200/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 bg-slate-900 text-white rounded-lg flex items-center justify-center font-bold text-xs shrink-0 font-mono">
+                          {group.employeeName ? group.employeeName.split(' ').map(n=>n[0]).join('').substring(0, 2).toUpperCase() : 'EMP'}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-slate-800">{group.employeeName}</h4>
+                            <span className="font-mono text-[10px] font-bold text-indigo-650 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded">
+                              {group.employeeId}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 mt-0.5">
+                            Rank: <span className="font-medium text-slate-700">{group.rank || 'Staff'}</span> • Department: <span className="font-semibold text-slate-700">{group.department}</span>
+                          </p>
+                        </div>
+                      </div>
 
-              <th className="px-4 py-2 text-right w-16">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100/85 text-slate-700">
-            {paginatedRecords.length === 0 ? (
-              <tr>
-                <td colSpan={10 + customHeaders.length} className="px-6 py-14 text-center text-slate-400">
-                  <div className="flex flex-col items-center justify-center space-y-1.5">
-                    <SlidersHorizontal className="w-6 h-6 text-slate-350" />
-                    <p className="font-bold text-slate-600 text-xs">No training records found</p>
-                    <p className="text-[10px] text-slate-450">Try resetting filters above or upload a fresh Excel log sheet.</p>
+                      {/* Multi-badge status cluster tracker */}
+                      <div className="flex items-center gap-1.5 text-[10px] self-start sm:self-auto font-mono">
+                        <span className="bg-indigo-50 border border-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-bold">
+                          {total} Course{total !== 1 ? 's' : ''}
+                        </span>
+                        {passed > 0 && (
+                          <span className="bg-emerald-50 border border-emerald-100 text-emerald-700 px-2 py-0.5 rounded font-bold">
+                            {passed} Passed
+                          </span>
+                        )}
+                        {failed > 0 && (
+                          <span className="bg-red-50 border border-red-100 text-red-700 px-2 py-0.5 rounded font-bold">
+                            {failed} Failed
+                          </span>
+                        )}
+                        {withdrawn > 0 && (
+                          <span className="bg-amber-50 border border-amber-100 text-amber-700 px-2 py-0.5 rounded font-bold">
+                            {withdrawn} Withdrawn
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Timeline List Sub-Table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-[11px] border-collapse">
+                        <thead className="bg-slate-50/20 text-slate-500 border-b border-slate-100 font-semibold text-[10px] tracking-wider uppercase">
+                          <tr>
+                            <th className="px-4 py-2 w-12 text-center text-slate-400">S No</th>
+                            <th className="px-3 py-2">Training Activity / Course Title</th>
+                            <th className="px-3 py-2 w-32">Category</th>
+                            <th className="px-3 py-2 w-24 text-center">Status</th>
+                            {customHeaders.map((ch) => (
+                              <th key={ch.id} className="px-3 py-2 italic font-medium max-w-[100px] truncate">{ch.name}</th>
+                            ))}
+                            {!isReadOnly && <th className="px-4 py-2 text-right w-16">Actions</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-slate-705">
+                          {group.records.map((r, rIdx) => (
+                            <tr key={r.id} className="hover:bg-slate-50/25 transition-colors">
+                              <td className="px-4 py-2 text-center font-mono text-slate-400">{r.sNo || (rIdx + 1)}</td>
+                              <td className="px-3 py-2 font-medium text-slate-800 break-words">{r.trainingTitle}</td>
+                              <td className="px-3 py-2">
+                                <span className="bg-slate-50 text-slate-500 text-[10px] px-2 py-0.5 rounded border border-slate-150">
+                                  {r.category || 'N/A'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <span
+                                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${
+                                    r.status?.trim().toLowerCase() === 'pass' || r.status?.trim().toLowerCase() === 'completed'
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                      : r.status?.trim().toLowerCase() === 'fail' || r.status?.trim().toLowerCase() === 'failed'
+                                      ? 'bg-red-50 text-red-750 border border-red-200'
+                                      : r.status?.trim().toLowerCase() === 'withdrawn'
+                                      ? 'bg-amber-50 text-amber-700 border border-amber-105'
+                                      : 'bg-slate-50 text-slate-600'
+                                  }`}
+                                >
+                                  {r.status}
+                                </span>
+                              </td>
+                              {customHeaders.map((ch) => (
+                                <td key={ch.id} className="px-3 py-2 text-slate-500 truncate max-w-[100px]">
+                                  {r.customFields?.[ch.id] !== undefined ? String(r.customFields[ch.id]) : '-'}
+                                </td>
+                              ))}
+                              {!isReadOnly && (
+                                <td className="px-4 py-2 text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    {confirmDeleteId === r.id ? (
+                                      <div className="flex items-center gap-1 bg-red-100 p-0.5 rounded border border-red-200">
+                                        <button
+                                          onClick={async () => {
+                                            await onDeleteRecord(r.id);
+                                            setConfirmDeleteId(null);
+                                          }}
+                                          className="bg-red-650 hover:bg-red-700 text-white p-0.5 rounded text-[9px] font-bold"
+                                        >
+                                          <Check className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          onClick={() => setConfirmDeleteId(null)}
+                                          className="bg-white text-slate-500 p-0.5 rounded"
+                                        >
+                                          <X className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <button
+                                          onClick={() => openEditModal(r)}
+                                          className="p-1 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded transition-colors"
+                                        >
+                                          <Edit2 className="w-3 h-3" />
+                                        </button>
+                                        <button
+                                          onClick={() => setConfirmDeleteId(r.id)}
+                                          className="p-1 text-slate-400 hover:text-red-655 hover:bg-red-50/50 rounded transition-colors"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </td>
-              </tr>
-            ) : (
-              paginatedRecords.map((r) => (
-                <tr
-                  key={r.id}
-                  className={`hover:bg-slate-50/50 transition-colors divide-x divide-slate-100/40 ${
-                    selectedRows.includes(r.id) ? 'bg-indigo-50/15' : ''
-                  }`}
-                >
-                  <td className="px-3 py-1.5 text-center">
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-[11px] border-collapse" id="master-training-table-element">
+            <thead className="bg-slate-50/70 text-slate-500 border-b border-slate-200/60 font-semibold">
+              <tr className="divide-x divide-slate-100/40">
+                {!isReadOnly && (
+                  <th className="px-3 py-2 text-center w-8">
                     <input
                       type="checkbox"
-                      checked={selectedRows.includes(r.id)}
-                      onChange={(e) => handleSelectRow(r.id, e.target.checked)}
+                      onChange={handleSelectAll}
+                      checked={paginatedRecords.length > 0 && paginatedRecords.every((r) => selectedRows.includes(r.id))}
                       className="rounded-sm border-slate-300 text-slate-900 focus:ring-slate-900 w-3.5 h-3.5"
                     />
-                  </td>
-                  <td className="px-2 py-1.5 text-center font-mono text-slate-400">{r.sNo || '-'}</td>
-                  <td className="px-2 py-1.5 truncate text-slate-500">{r.rank || '-'}</td>
-                  <td className="px-3 py-1.5 font-mono font-bold text-slate-800">{r.employeeId}</td>
-                  <td className="px-3 py-1.5 font-medium text-slate-900">{r.employeeName}</td>
-                  <td className="px-3 py-1.5 text-slate-600 truncate">{r.department}</td>
-                  <td className="px-3 py-1.5 font-medium text-slate-800 max-w-[280px] break-words" title={r.trainingTitle}>
-                    {r.trainingTitle}
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <span className="bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded border border-slate-200">
-                      {r.category || 'N/A'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-1.5 text-center">
-                    <span
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${
-                        r.status?.trim().toLowerCase() === 'pass' || r.status?.trim().toLowerCase() === 'completed'
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                          : r.status?.trim().toLowerCase() === 'fail' || r.status?.trim().toLowerCase() === 'failed'
-                          ? 'bg-red-50 text-red-700 border border-red-10 border-red-200'
-                          : r.status?.trim().toLowerCase() === 'withdrawn'
-                          ? 'bg-amber-50 text-amber-700 border border-amber-100'
-                          : 'bg-slate-100 text-slate-600'
-                      }`}
-                    >
-                      {r.status}
-                    </span>
-                  </td>
+                  </th>
+                )}
+                <th className="px-2 py-2 font-bold w-12 text-center">S No</th>
+                <th className="px-2 py-2 w-14">Rank</th>
+                <th className="px-3 py-2 w-28">Employee ID</th>
+                <th className="px-3 py-2 w-32">Employee Name</th>
+                <th className="px-3 py-2 w-24">Department</th>
+                <th className="px-3 py-2 max-w-[250px]">Training Title</th>
+                <th className="px-3 py-2 w-24">Category</th>
+                <th className="px-3 py-2 w-20 text-center">Status</th>
 
-                  {/* Render dynamically added custom values */}
-                  {customHeaders.map((ch) => (
-                    <td key={ch.id} className="px-3 py-1.5 font-sans font-medium text-slate-600 max-w-[120px] truncate bg-yellow-50/5">
-                      {r.customFields?.[ch.id] !== undefined ? String(r.customFields[ch.id]) : '-'}
-                    </td>
-                  ))}
+                {/* Dynamic Added Customizable Column Headers */}
+                {customHeaders.map((ch) => (
+                  <th key={ch.id} className="px-3 py-2 text-slate-600 italic bg-yellow-50/20 max-w-[120px] truncate" title={ch.name}>
+                    {ch.name}
+                  </th>
+                ))}
 
-                  {/* Row manual actions */}
-                  <td className="px-4 py-1.5 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {confirmDeleteId === r.id ? (
-                        <div className="flex items-center gap-1 bg-red-100 p-0.5 rounded border border-red-200">
-                          <button
-                            onClick={async () => {
-                              await onDeleteRecord(r.id);
-                              setConfirmDeleteId(null);
-                            }}
-                            className="bg-red-600 hover:bg-red-700 text-white p-0.5 rounded text-[9px] font-bold"
-                            title="Confirm delete"
-                          >
-                            <Check className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={() => setConfirmDeleteId(null)}
-                            className="bg-white text-slate-500 hover:text-slate-700 p-0.5 rounded text-[9px]"
-                            title="Cancel"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => openEditModal(r)}
-                            className="p-1 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded transition-colors cursor-pointer"
-                            title="Edit entry"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={() => setConfirmDeleteId(r.id)}
-                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50/50 rounded transition-colors cursor-pointer"
-                            title="Delete entry"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </>
-                      )}
+                {!isReadOnly && <th className="px-4 py-2 text-right w-16">Actions</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100/85 text-slate-705">
+              {paginatedRecords.length === 0 ? (
+                <tr>
+                  <td colSpan={10 + customHeaders.length} className="px-6 py-14 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center space-y-1.5">
+                      <SlidersHorizontal className="w-6 h-6 text-slate-350" />
+                      <p className="font-bold text-slate-600 text-xs">No training records found</p>
+                      <p className="text-[10px] text-slate-450">Try resetting filters above or upload a fresh Excel log sheet.</p>
                     </div>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                paginatedRecords.map((r) => (
+                  <tr
+                    key={r.id}
+                    className={`hover:bg-slate-50/50 transition-colors divide-x divide-slate-100/40 ${
+                      selectedRows.includes(r.id) ? 'bg-indigo-50/15' : ''
+                    }`}
+                  >
+                    {!isReadOnly && (
+                      <td className="px-3 py-1.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedRows.includes(r.id)}
+                          onChange={(e) => handleSelectRow(r.id, e.target.checked)}
+                          className="rounded-sm border-slate-300 text-slate-900 focus:ring-slate-900 w-3.5 h-3.5"
+                        />
+                      </td>
+                    )}
+                    <td className="px-2 py-1.5 text-center font-mono text-slate-400">{r.sNo || '-'}</td>
+                    <td className="px-2 py-1.5 truncate text-slate-500">{r.rank || '-'}</td>
+                    <td className="px-3 py-1.5 font-mono font-bold text-slate-800">{r.employeeId}</td>
+                    <td className="px-3 py-1.5 font-medium text-slate-900">{r.employeeName}</td>
+                    <td className="px-3 py-1.5 text-slate-600 truncate">{r.department}</td>
+                    <td className="px-3 py-1.5 font-medium text-slate-800 max-w-[280px] break-words" title={r.trainingTitle}>
+                      {r.trainingTitle}
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <span className="bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded border border-slate-200">
+                        {r.category || 'N/A'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5 text-center">
+                      <span
+                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${
+                          r.status?.trim().toLowerCase() === 'pass' || r.status?.trim().toLowerCase() === 'completed'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                            : r.status?.trim().toLowerCase() === 'fail' || r.status?.trim().toLowerCase() === 'failed'
+                            ? 'bg-red-50 text-red-700 border border-red-10 border-red-200'
+                            : r.status?.trim().toLowerCase() === 'withdrawn'
+                            ? 'bg-amber-50 text-amber-700 border border-amber-100'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {r.status}
+                      </span>
+                    </td>
+
+                    {/* Render dynamically added custom values */}
+                    {customHeaders.map((ch) => (
+                      <td key={ch.id} className="px-3 py-1.5 font-sans font-medium text-slate-600 max-w-[120px] truncate bg-yellow-50/5">
+                        {r.customFields?.[ch.id] !== undefined ? String(r.customFields[ch.id]) : '-'}
+                      </td>
+                    ))}
+
+                    {/* Row manual actions */}
+                    {!isReadOnly && (
+                      <td className="px-4 py-1.5 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {confirmDeleteId === r.id ? (
+                            <div className="flex items-center gap-1 bg-red-100 p-0.5 rounded border border-red-200">
+                              <button
+                                onClick={async () => {
+                                  await onDeleteRecord(r.id);
+                                  setConfirmDeleteId(null);
+                                }}
+                                className="bg-red-600 hover:bg-red-700 text-white p-0.5 rounded text-[9px] font-bold"
+                                title="Confirm delete"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="bg-white text-slate-500 hover:text-slate-700 p-0.5 rounded text-[9px]"
+                                title="Cancel"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => openEditModal(r)}
+                                className="p-1 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                                title="Edit entry"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => setConfirmDeleteId(r.id)}
+                                className="p-1 text-slate-400 hover:text-red-650 hover:bg-red-50/50 rounded transition-colors cursor-pointer"
+                                title="Delete entry"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Pagination Grid Navigation Footer */}
-      {totalPages > 1 && (
+      {activeTotalPages > 1 && (
         <div className="px-4 py-2 border-t border-slate-200/60 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-2.5">
           <div className="text-[10px] text-slate-450">
             Showing <span className="font-bold text-slate-755 font-mono">{(currentPage - 1) * itemsPerPage + 1}</span> to{' '}
             <span className="font-bold text-slate-755 font-mono">
-              {Math.min(currentPage * itemsPerPage, filteredRecords.length)}
+              {Math.min(currentPage * itemsPerPage, isGroupedByEmployee ? groupedByEmployee.length : filteredRecords.length)}
             </span>{' '}
-            of <span className="font-bold text-slate-755 font-mono">{filteredRecords.length}</span> master entries
+            of <span className="font-bold text-slate-755 font-mono">{isGroupedByEmployee ? groupedByEmployee.length : filteredRecords.length}</span> {isGroupedByEmployee ? 'employees collectively' : 'master entries'}
           </div>
 
           <div className="flex items-center gap-1 font-mono">
             <button
               onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
               disabled={currentPage === 1}
-              className="p-1 border border-slate-200 rounded bg-white text-slate-500 hover:text-slate-750 disabled:opacity-50 disabled:bg-slate-100 transition-colors"
+              className="p-1 border border-slate-200 rounded bg-white text-slate-500 hover:text-slate-750 disabled:opacity-50 disabled:bg-slate-100 transition-colors cursor-pointer"
             >
-              <ChevronLeft className="w-3 h-3" />
+              <ChevronLeft className="w-4 h-4" />
             </button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+            {Array.from({ length: activeTotalPages }, (_, i) => i + 1).map((p) => (
               <button
                 key={p}
                 onClick={() => setCurrentPage(p)}
-                className={`w-6 h-6 rounded text-[10px] font-bold transition-all ${
+                className={`w-6 h-6 rounded text-[10px] font-bold transition-all cursor-pointer ${
                   currentPage === p
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'border border-slate-200 text-slate-500 bg-white hover:text-slate-700 hover:bg-slate-50'
@@ -658,12 +896,12 @@ export default function TrainingTable({
               </button>
             ))}
             <button
-              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className="p-1 border border-slate-200 rounded bg-white text-slate-500 hover:text-slate-750 disabled:opacity-50 disabled:bg-slate-100 transition-colors"
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, activeTotalPages))}
+              disabled={currentPage === activeTotalPages}
+              className="p-1 border border-slate-200 rounded bg-white text-slate-500 hover:text-slate-750 disabled:opacity-50 disabled:bg-slate-100 transition-colors cursor-pointer"
               id="next-page-btn"
             >
-              <ChevronRight className="w-3 h-3" />
+              <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         </div>

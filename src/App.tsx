@@ -42,6 +42,9 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return localStorage.getItem('isLoggedIn') === 'true';
   });
+  const [userRole, setUserRole] = useState<'admin' | 'manager'>(() => {
+    return (localStorage.getItem('userRole') as 'admin' | 'manager') || 'admin';
+  });
   const [records, setRecords] = useState<TrainingRecord[]>([]);
   const [batches, setBatches] = useState<UploadBatch[]>([]);
   const [customHeaders, setCustomHeaders] = useState<CustomHeader[]>([]);
@@ -135,15 +138,17 @@ export default function App() {
 
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
+    setUserRole((localStorage.getItem('userRole') as 'admin' | 'manager') || 'admin');
     triggerNotification('Authenticated successfully. Welcome back to the training records portal.', 'success');
   };
 
   const handleLogout = async () => {
     try {
       localStorage.removeItem('isLoggedIn');
+      localStorage.removeItem('userRole');
       await signOut(auth).catch(() => {});
       setIsAuthenticated(false);
-      triggerNotification('Logged out of administrative portal session.', 'info');
+      triggerNotification('Logged out of workspace session.', 'info');
     } catch (e: any) {
       console.error('Logout error:', e);
       triggerNotification('Failed to complete sign out.', 'warning');
@@ -315,12 +320,14 @@ export default function App() {
                 <Database className="w-4 h-4 mr-3 opacity-70" /> Training Records
               </button>
 
-              <button
-                onClick={() => setShowUploadModal(true)}
-                className="flex items-center px-5 py-3 text-xs font-semibold transition-colors text-left cursor-pointer w-full text-slate-400 hover:bg-slate-860 hover:text-white"
-              >
-                <FileSpreadsheet className="w-4 h-4 mr-3 opacity-70" /> Upload Excel
-              </button>
+              {userRole !== 'manager' && (
+                <button
+                  onClick={() => setShowUploadModal(true)}
+                  className="flex items-center px-5 py-3 text-xs font-semibold transition-colors text-left cursor-pointer w-full text-slate-400 hover:bg-slate-860 hover:text-white"
+                >
+                  <FileSpreadsheet className="w-4 h-4 mr-3 opacity-70" /> Upload Excel
+                </button>
+              )}
 
               <div className="mt-6 px-5 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Reports & Insights</div>
               
@@ -345,20 +352,24 @@ export default function App() {
               </button>
             </nav>
 
-            {/* Admin User Profile Section */}
+            {/* User Profile Section */}
             <div className="p-4 border-t border-slate-800 shrink-0">
               <div className="flex items-center gap-3 p-2 rounded bg-slate-800/40 border border-slate-800/40">
-                <div className="w-7 h-7 rounded-sm bg-slate-700 font-bold text-xs flex items-center justify-center text-slate-300">
-                  U
+                <div className={`w-7 h-7 rounded-sm font-bold text-xs flex items-center justify-center ${userRole === 'manager' ? 'bg-indigo-900 text-indigo-200' : 'bg-slate-700 text-slate-300'}`}>
+                  {userRole === 'manager' ? 'M' : 'A'}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-medium truncate text-white">Admin User</p>
-                  <p className="text-[9px] text-slate-500 truncate">{auth.currentUser?.email || 'admin@trainlogic.io'}</p>
+                  <p className="text-[11px] font-medium truncate text-white">
+                    {userRole === 'manager' ? 'Manager (amhrd)' : 'Admin User'}
+                  </p>
+                  <p className="text-[9px] text-slate-500 truncate">
+                    {userRole === 'manager' ? 'amhrd@trainlogic.io' : (auth.currentUser?.email || 'admin@trainlogic.io')}
+                  </p>
                 </div>
                 <button
                   onClick={handleLogout}
                   className="text-slate-400 hover:text-red-400 p-1 rounded transition-colors cursor-pointer"
-                  title="Sign out of administrative workspace"
+                  title="Sign out of workspace"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                 </button>
@@ -371,7 +382,7 @@ export default function App() {
             {/* Top Toolbar Header */}
             <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 shadow-2xs">
               <h1 className="text-sm font-bold text-slate-800 tracking-tight">
-                Admin Portal: Employee Training Records
+                {userRole === 'manager' ? 'Manager Portal' : 'Admin Portal'}: Employee Training Records
               </h1>
               
               <div className="flex items-center gap-3.5">
@@ -381,12 +392,14 @@ export default function App() {
                   <span>DB: CONNECTED</span>
                 </div>
 
-                <button
-                  onClick={() => setShowUploadModal(true)}
-                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold tracking-wide shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <span>⊕</span> New Upload
-                </button>
+                {userRole !== 'manager' && (
+                  <button
+                    onClick={() => setShowUploadModal(true)}
+                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold tracking-wide shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span>⊕</span> New Upload
+                  </button>
+                )}
                 
                 {/* Mobile Logout trigger */}
                 <button
@@ -449,6 +462,7 @@ export default function App() {
                       onDeleteRecords={handleDeleteRecords}
                       onAddCustomHeader={handleAddCustomHeader}
                       onDeleteCustomHeader={handleDeleteCustomHeader}
+                      userRole={userRole}
                     />
                   </motion.div>
                 )}
