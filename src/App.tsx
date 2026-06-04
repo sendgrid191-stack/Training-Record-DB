@@ -340,28 +340,6 @@ export default function App() {
                   <FileSpreadsheet className="w-4 h-4 mr-3 opacity-70" /> Upload Excel
                 </button>
               )}
-
-              <div className="mt-6 px-5 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Reports & Insights</div>
-              
-              <button
-                onClick={() => {
-                  setActiveTab('auditor');
-                  triggerNotification('Navigated to training policy compliance auditor ledgers.', 'info');
-                }}
-                className="flex items-center px-5 py-3 text-xs font-semibold transition-colors text-left cursor-pointer w-full text-slate-400 hover:bg-slate-870 hover:text-white"
-              >
-                <span className="mr-3 opacity-70">⎙</span> Compliance Summary
-              </button>
-
-              <button
-                onClick={() => {
-                  setActiveTab('records');
-                  triggerNotification('Use the database control panel below to download spreadsheet files.', 'info');
-                }}
-                className="flex items-center px-5 py-3 text-xs font-semibold transition-colors text-left cursor-pointer w-full text-slate-400 hover:bg-slate-880 hover:text-white"
-              >
-                <span className="mr-3 opacity-70">↓</span> Export Master Database
-              </button>
             </nav>
 
             {/* User Profile Section */}
