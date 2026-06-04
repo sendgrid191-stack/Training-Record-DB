@@ -39,13 +39,15 @@ import TrainingTable from './components/TrainingTable';
 import UploadModal from './components/UploadModal';
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return localStorage.getItem('isLoggedIn') === 'true';
+  });
   const [records, setRecords] = useState<TrainingRecord[]>([]);
   const [batches, setBatches] = useState<UploadBatch[]>([]);
   const [customHeaders, setCustomHeaders] = useState<CustomHeader[]>([]);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'records'>('dashboard');
-  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+  const [isLoadingAuth, setIsLoadingAuth] = useState(false);
 
   // Success / Warning notification state
   const [notification, setNotification] = useState<{
@@ -53,15 +55,19 @@ export default function App() {
     type: 'success' | 'warning' | 'info';
   } | null>(null);
 
-  // Setup real-time authentication listener
+  // Setup real-time authentication listener (fallback/optional compatibility)
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (user && user.emailVerified) {
+      if (user) {
+        localStorage.setItem('isLoggedIn', 'true');
         setIsAuthenticated(true);
       } else {
-        setIsAuthenticated(false);
-        setRecords([]);
-        setBatches([]);
+        // Do not force logout on unauthenticated Firebase user if local session is valid
+        if (localStorage.getItem('isLoggedIn') !== 'true') {
+          setIsAuthenticated(false);
+          setRecords([]);
+          setBatches([]);
+        }
       }
       setIsLoadingAuth(false);
     });
@@ -134,7 +140,8 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
+      localStorage.removeItem('isLoggedIn');
+      await signOut(auth).catch(() => {});
       setIsAuthenticated(false);
       triggerNotification('Logged out of administrative portal session.', 'info');
     } catch (e: any) {
