@@ -1,0 +1,6 @@
+{
+  "name": "Employee Training Record Database",
+  "description": "A database-driven platform for secure management, search, validation, and historical merging of employee training records from spreadsheet uploads.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

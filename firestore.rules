@@ -1,0 +1,137 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // -------------------------------------------------------------
+    // PHASE 4.1: GLOBAL SAFETY NET
+    // -------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------
+    // BASE SECURITY PRIMITIVES & ADMINISTRATIVE BOUNDARY RULES
+    // -------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Hardened admin check that verifies against structural administrators
+    // or bootstrapped admins from deployment runtime safely.
+    function isAdmin() {
+      return isVerified() && (
+        request.auth.token.email == "ullahikram307@gmail.com" || 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Prevents 1.5KB malicious injection attacks into Document Keys
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // -------------------------------------------------------------
+    // DATABASE SCHEMAS & FIELD TYPE VALIDATIONS
+    // -------------------------------------------------------------
+
+    // 1. Validator for Training Record Entries
+    function isValidRecord(data) {
+      return (
+        data.keys().hasAll(['id', 'employeeId', 'employeeName', 'department', 'trainingTitle', 'status', 'uploadedAt', 'uploadBatchId']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.employeeId is string && data.employeeId.size() <= 128 &&
+        data.employeeName is string && data.employeeName.size() <= 128 &&
+        data.department is string && data.department.size() <= 128 &&
+        data.trainingTitle is string && data.trainingTitle.size() <= 256 &&
+        data.status is string && data.status.size() <= 128 &&
+        data.uploadedAt is string &&
+        data.uploadBatchId is string && data.uploadBatchId.size() <= 128 &&
+        (!('category' in data) || (data.category is string && data.category.size() <= 256)) &&
+        (!('sNo' in data) || (data.sNo is string && data.sNo.size() <= 128)) &&
+        (!('rank' in data) || (data.rank is string && data.rank.size() <= 128)) &&
+        (!('customFields' in data) || (data.customFields is map))
+      );
+    }
+
+    // 1.5 Validator for Dynamically Created Training Record Headers
+    function isValidCustomHeader(data) {
+      return (
+        data.keys().hasAll(['id', 'name', 'type', 'createdAt']) &&
+        data.keys().size() == 4 &&
+        data.id is string && data.id.size() <= 128 &&
+        data.name is string && data.name.size() <= 128 &&
+        data.type is string && (data.type == 'string' || data.type == 'number' || data.type == 'boolean') &&
+        data.createdAt is string
+      );
+    }
+
+    // 2. Validator for Bulk Upload Batches
+    function isValidBatch(data) {
+      return (
+        data.keys().hasAll(['id', 'filename', 'uploadedAt', 'recordsCount', 'status']) &&
+        data.keys().size() <= 7 &&
+        data.id is string && data.id.size() <= 128 &&
+        data.filename is string && data.filename.size() <= 256 &&
+        data.uploadedAt is string &&
+        data.recordsCount is number && data.recordsCount >= 0 &&
+        data.status is string && (data.status == 'Success' || data.status == 'Completed with warnings' || data.status == 'Failed') &&
+        (!('remarks' in data) || (data.remarks is string && data.remarks.size() <= 1000))
+      );
+    }
+
+    // 3. Validator for Authorized Administrators
+    function isValidAdmin(data) {
+      return (
+        data.keys().hasAll(['email']) &&
+        data.keys().size() == 1 &&
+        data.email is string && data.email.size() <= 128
+      );
+    }
+
+    // -------------------------------------------------------------
+    // TARGET MATCH EXPRESSIONS
+    // -------------------------------------------------------------
+
+    // Training Records Matches
+    match /records/{recordId} {
+      allow read: if isVerified();
+      allow create: if isAdmin() && isValidId(recordId) && isValidRecord(incoming());
+      allow update: if isAdmin() && isValidId(recordId) && isValidRecord(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(recordId);
+    }
+
+    // Bulk Upload Batches Matches
+    match /batches/{batchId} {
+      allow read: if isVerified();
+      allow create: if isAdmin() && isValidId(batchId) && isValidBatch(incoming());
+      allow update: if isAdmin() && isValidId(batchId) && isValidBatch(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(batchId);
+    }
+
+    // Configured System Administrators Matches
+    match /admins/{adminId} {
+      allow read: if isVerified();
+      allow create, update: if isAdmin() && isValidId(adminId) && isValidAdmin(incoming());
+      allow delete: if isAdmin() && isValidId(adminId);
+    }
+
+    // Configured Dynamic Custom Headers Matches
+    match /custom_headers/{headerId} {
+      allow read: if isVerified();
+      allow create, update: if isAdmin() && isValidId(headerId) && isValidCustomHeader(incoming());
+      allow delete: if isAdmin() && isValidId(headerId);
+    }
+  }
+}

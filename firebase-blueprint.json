@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "TrainingRecord": {
+      "title": "TrainingRecord",
+      "description": "An employee training record entry with new baseline headers and custom fields.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "trainingTitle": { "type": "string" },
+        "category": { "type": "string" },
+        "sNo": { "type": "string" },
+        "rank": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "department": { "type": "string" },
+        "status": { "type": "string" },
+        "uploadedAt": { "type": "string" },
+        "uploadBatchId": { "type": "string" },
+        "customFields": { "type": "object" }
+      },
+      "required": ["id", "trainingTitle", "employeeName", "employeeId", "status", "uploadedAt", "uploadBatchId"]
+    },
+    "CustomHeader": {
+      "title": "CustomHeader",
+      "description": "A dynamically defined training record column header.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["string", "number", "boolean"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "type", "createdAt"]
+    },
+    "UploadBatch": {
+      "title": "UploadBatch",
+      "description": "A batch of spreadsheet uploads.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "filename": { "type": "string" },
+        "uploadedAt": { "type": "string" },
+        "recordsCount": { "type": "number" },
+        "status": { "type": "string", "enum": ["Success", "Completed with warnings", "Failed"] },
+        "remarks": { "type": "string" }
+      },
+      "required": ["id", "filename", "uploadedAt", "recordsCount", "status"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "An administrative user.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" }
+      },
+      "required": ["email"]
+    }
+  },
+  "firestore": {
+    "/records/{recordId}": {
+      "schema": "TrainingRecord",
+      "description": "Master list of all training records."
+    },
+    "/batches/{batchId}": {
+      "schema": "UploadBatch",
+      "description": "List of spreadsheet import events."
+    },
+    "/admins/{adminId}": {
+      "schema": "Admin",
+      "description": "List of authorized administrator user IDs."
+    },
+    "/custom_headers/{headerId}": {
+      "schema": "CustomHeader",
+      "description": "Custom dynamic headers created by admins."
+    }
+  }
+}
