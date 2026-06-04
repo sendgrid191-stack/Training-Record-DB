@@ -73,7 +73,7 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
             <div className="w-12 h-12 bg-indigo-500/10 text-indigo-400 rounded-xl flex items-center justify-center border border-indigo-500/20 mb-3 shadow-[0_0_15px_rgba(99,102,241,0.15)]">
               <ShieldCheck className="w-6 h-6" />
             </div>
-            <h3 className="text-lg font-extrabold text-white tracking-tight">TrainLogic Portal</h3>
+            <h3 className="text-lg font-extrabold text-white tracking-tight">HRD Training Portal</h3>
             <p className="text-slate-400 text-xs mt-1.5 max-w-xs mx-auto leading-relaxed">
               Sign in with your credentials to access and manage training records.
             </p>

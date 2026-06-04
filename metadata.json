@@ -1,5 +1,5 @@
 {
-  "name": "Employee Training Record Database",
+  "name": "HRD Training Portal",
   "description": "A database-driven platform for secure management, search, validation, and historical merging of employee training records from spreadsheet uploads.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

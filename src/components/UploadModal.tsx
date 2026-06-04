@@ -313,7 +313,6 @@ export default function UploadModal({ onClose, onImportComplete }: UploadModalPr
                                 <th className="px-4 py-3">Training Title</th>
                                 <th className="px-4 py-3">Category</th>
                                 <th className="px-4 py-3 text-center">Status</th>
-                                <th className="px-4 py-3 text-right">Hours</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -325,15 +324,15 @@ export default function UploadModal({ onClose, onImportComplete }: UploadModalPr
                                   <td className="px-4 py-2.5 font-medium text-slate-700 truncate max-w-[150px]">{r.trainingTitle}</td>
                                   <td className="px-4 py-2.5">
                                     <span className="bg-indigo-50 text-indigo-600 text-[10px] font-semibold px-2 py-0.5 rounded-full">
-                                      {r.trainingCategory || 'Compliance'}
+                                      {r.category || 'Compliance'}
                                     </span>
                                   </td>
                                   <td className="px-4 py-2.5 text-center">
                                     <span
                                       className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                        r.status === 'Completed'
+                                        r.status?.trim().toLowerCase() === 'pass' || r.status?.trim().toLowerCase() === 'completed'
                                           ? 'bg-emerald-50 text-emerald-600'
-                                          : r.status === 'Pending'
+                                          : r.status?.trim().toLowerCase() === 'withdrawn'
                                           ? 'bg-amber-50 text-amber-600'
                                           : 'bg-red-50 text-red-600'
                                       }`}
@@ -341,7 +340,6 @@ export default function UploadModal({ onClose, onImportComplete }: UploadModalPr
                                       {r.status}
                                     </span>
                                   </td>
-                                  <td className="px-4 py-2.5 text-right font-mono font-medium text-slate-600">{r.hours} hrs</td>
                                 </tr>
                               ))}
                             </tbody>

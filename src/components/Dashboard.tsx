@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useMemo } from 'react';
-import { motion } from 'motion/react';
+import { useMemo, useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   BarChart,
   Bar,
@@ -17,19 +17,23 @@ import {
   PieChart,
   Pie,
   Cell,
-  LineChart,
-  Line,
 } from 'recharts';
 import {
   Users,
   Award,
-  Clock,
-  ShieldCheck,
+  BookOpen,
+  RotateCw,
+  Search,
+  CheckCircle,
+  X,
   TrendingUp,
   FileCheck2,
-  AlertTriangle,
+  FolderCheck,
+  BookMarked,
+  Sparkles,
 } from 'lucide-react';
 import { TrainingRecord, UploadBatch } from '../types';
+import { getNormalizedCategory } from '../utils/compliance';
 
 interface DashboardProps {
   records: TrainingRecord[];
@@ -37,243 +41,402 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ records, batches }: DashboardProps) {
-  // Compute Key Metrics
-  const metrics = useMemo(() => {
-    const totalRecords = records.length;
-    const uniqueEmployees = new Set(records.map((r) => r.employeeId)).size;
-    const uniqueTrainings = new Set(records.map((r) => r.trainingTitle)).size;
+  // Modal toggle for unique training activities directory
+  const [showUniqueTrainingsModal, setShowUniqueTrainingsModal] = useState(false);
+  const [courseSearch, setCourseSearch] = useState('');
+  const [courseCategoryFilter, setCourseCategoryFilter] = useState('All');
 
-    // Detect successful completions (Pass or Completed)
-    const completed = records.filter(
-      (r) =>
-        r.status?.trim().toLowerCase() === 'pass' ||
-        r.status?.trim().toLowerCase() === 'completed'
-    ).length;
-
-    const failed = records.filter(
-      (r) =>
-        r.status?.trim().toLowerCase() === 'fail' ||
-        r.status?.trim().toLowerCase() === 'failed'
-    ).length;
-
-    const withdrawn = records.filter(
-      (r) =>
-        r.status?.trim().toLowerCase() === 'withdrawn' ||
-        r.status?.trim().toLowerCase() === 'cancelled'
-    ).length;
-
-    // Others like Pending/Scheduled
-    const pending = totalRecords - completed - failed - withdrawn;
-
-    const departments = new Set(records.map((r) => r.department).filter(Boolean)).size;
-
-    // Dynamically look for an 'hours', 'duration', or 'days' field in customFields
-    let totalHours = 0;
+  // 1. Core unique training course syllabus lookup
+  const uniqueTrainingsList = useMemo(() => {
+    const titlesMap = new Map<string, { category: string; count: number; passedCount: number }>();
+    
     records.forEach((r) => {
-      if (r.customFields) {
-        const foundKey = Object.keys(r.customFields).find(
-          (k) => k.toLowerCase().includes('hours') || k.toLowerCase().includes('duration')
-        );
-        if (foundKey) {
-          const numVal = parseFloat(r.customFields[foundKey]);
-          if (!isNaN(numVal)) {
-            totalHours += numVal;
-          }
+      const title = (r.trainingTitle || '').trim();
+      if (!title) return;
+      const cat = (r.category || '').trim();
+      const isPassed = r.status?.trim().toLowerCase() === 'pass' || r.status?.trim().toLowerCase() === 'completed';
+
+      const existing = titlesMap.get(title);
+      if (existing) {
+        existing.count++;
+        if (isPassed) existing.passedCount++;
+        if (cat && !existing.category) {
+          existing.category = cat;
         }
+      } else {
+        titlesMap.set(title, {
+          category: cat || 'Uncategorized',
+          count: 1,
+          passedCount: isPassed ? 1 : 0,
+        });
       }
     });
 
-    const complianceRate = totalRecords
-      ? Math.round((completed / totalRecords) * 105) // allow styling variation, or keep to 100 max
-      : 100;
-    const cappedComplianceRate = Math.min(complianceRate, 100);
+    return Array.from(titlesMap.entries()).map(([title, val]) => ({
+      title,
+      category: val.category,
+      count: val.count,
+      passedCount: val.passedCount,
+    })).sort((a, b) => a.title.localeCompare(b.title));
+  }, [records]);
+
+  // 2. Count unique training activities per core compliance categories accurately
+  const categorySummary = useMemo(() => {
+    const counts = {
+      'Fundamentals': 0,
+      'CAT-A': 0,
+      'CAT-B': 0,
+      'CAT-C': 0,
+      'CAT-D': 0,
+      'Other': 0
+    };
+
+    const lists: Record<string, string[]> = {
+      'Fundamentals': [],
+      'CAT-A': [],
+      'CAT-B': [],
+      'CAT-C': [],
+      'CAT-D': [],
+      'Other': []
+    };
+
+    uniqueTrainingsList.forEach((item) => {
+      const catKey = getNormalizedCategory(item.category);
+      counts[catKey]++;
+      lists[catKey].push(item.title);
+    });
+
+    return { counts, lists };
+  }, [uniqueTrainingsList]);
+
+  // 3. Totals and Rotations calculations
+  const rotationStats = useMemo(() => {
+    const uniqueEmployees = new Set(records.map((r) => r.employeeId).filter(Boolean)).size;
+    const passedRecords = records.filter(
+      (r) =>
+        r.status?.trim().toLowerCase() === 'pass' ||
+        r.status?.trim().toLowerCase() === 'completed'
+    );
+    const totalPassedRotations = passedRecords.length;
+    const avgPassedPerEmployee = uniqueEmployees > 0 
+      ? (totalPassedRotations / uniqueEmployees).toFixed(1) 
+      : '0.0';
 
     return {
-      totalRecords,
+      totalPassedRotations,
+      avgPassedPerEmployee,
       uniqueEmployees,
-      uniqueTrainings,
-      completed,
-      failed,
-      withdrawn,
-      pending,
-      departments,
-      totalHours,
-      complianceRate: cappedComplianceRate,
     };
   }, [records]);
 
-  // Chart 1: Department wise Completed vs Others
+  // 4. Employee dynamic compliance summaries for pie visualization
+  const employeeComplianceList = useMemo(() => {
+    const empGroups: Record<string, {
+      employeeId: string;
+      rank: string;
+      passedRecords: TrainingRecord[];
+    }> = {};
+
+    records.forEach((r) => {
+      const empId = (r.employeeId || '').trim();
+      if (!empId) return;
+      const key = empId.toUpperCase();
+      const isPassed = r.status?.trim().toLowerCase() === 'pass' || r.status?.trim().toLowerCase() === 'completed';
+
+      if (!empGroups[key]) {
+        empGroups[key] = {
+          employeeId: r.employeeId,
+          rank: r.rank || 'Staff',
+          passedRecords: [],
+        };
+      }
+      if (isPassed) {
+        empGroups[key].passedRecords.push(r);
+      }
+    });
+
+    return Object.values(empGroups).map((emp) => {
+      const completedByCategory: Record<string, string[]> = {
+        'Fundamentals': [],
+        'CAT-A': [],
+        'CAT-B': [],
+        'CAT-C': [],
+        'CAT-D': [],
+        'Other': []
+      };
+
+      const completedTitles = new Set<string>();
+
+      emp.passedRecords.forEach((r) => {
+        const title = (r.trainingTitle || '').trim();
+        if (!title || completedTitles.has(title)) return;
+        
+        completedTitles.add(title);
+        const normCat = getNormalizedCategory(r.category);
+        completedByCategory[normCat].push(title);
+      });
+
+      const normRank = emp.rank.toLowerCase();
+      const isAssistantManager = normRank.includes('assistant') && normRank.includes('manager');
+      const isManager = !isAssistantManager && normRank.includes('manager');
+
+      let rankClass: 'Assistant Manager' | 'Manager' | 'Other' = 'Other';
+      if (isAssistantManager) rankClass = 'Assistant Manager';
+      else if (isManager) rankClass = 'Manager';
+
+      const requirements = {
+        'Fundamentals': 0,
+        'CAT-A': 0,
+        'CAT-B': 0,
+        'CAT-C': 0,
+        'CAT-D': 0,
+      };
+
+      if (rankClass === 'Assistant Manager') {
+        requirements['Fundamentals'] = categorySummary.counts['Fundamentals'];
+        requirements['CAT-A'] = 5;
+        requirements['CAT-B'] = 4;
+        requirements['CAT-C'] = 1;
+        requirements['CAT-D'] = 2;
+      } else if (rankClass === 'Manager') {
+        requirements['Fundamentals'] = categorySummary.counts['Fundamentals'];
+        requirements['CAT-A'] = categorySummary.counts['CAT-A'];
+        requirements['CAT-B'] = 6;
+        requirements['CAT-C'] = 3;
+        requirements['CAT-D'] = 4;
+      }
+
+      let isComplied = true;
+      for (const cat of ['Fundamentals', 'CAT-A', 'CAT-B', 'CAT-C', 'CAT-D']) {
+        const completedCount = completedByCategory[cat].length;
+        const requiredCount = requirements[cat as keyof typeof requirements];
+        if (completedCount < requiredCount) {
+          isComplied = false;
+          break;
+        }
+      }
+
+      return {
+        isComplied: rankClass === 'Other' ? null : isComplied,
+        rankClass,
+      };
+    });
+  }, [records, categorySummary]);
+
+  // High-level metadata rates
+  const complianceStats = useMemo(() => {
+    const policyRankEmployees = employeeComplianceList.filter(e => e.rankClass !== 'Other');
+    const totalWithPolicy = policyRankEmployees.length;
+    const compliedCount = policyRankEmployees.filter(e => e.isComplied === true).length;
+    const rate = totalWithPolicy > 0 ? Math.round((compliedCount / totalWithPolicy) * 100) : 100;
+
+    const departmentSummaryCount = new Set(records.map((r) => r.department).filter(Boolean)).size;
+
+    return {
+      rate,
+      compliedCount,
+      totalWithPolicy,
+      departmentSummaryCount,
+    };
+  }, [employeeComplianceList, records]);
+
+  // Course filter list inside catalog
+  const filteredUniqueCourses = useMemo(() => {
+    return uniqueTrainingsList.filter((course) => {
+      const matchText = course.title.toLowerCase().includes(courseSearch.toLowerCase());
+      
+      let matchCat = true;
+      if (courseCategoryFilter !== 'All') {
+        const normCat = getNormalizedCategory(course.category);
+        if (normCat !== courseCategoryFilter) {
+          matchCat = false;
+        }
+      }
+
+      return matchText && matchCat;
+    });
+  }, [uniqueTrainingsList, courseSearch, courseCategoryFilter]);
+
+  // Dept bar chart counts
   const deptData = useMemo(() => {
-    const map: Record<string, { department: string; Pass: number; Fail: number; Withdrawn: number; Other: number }> = {};
+    const map: Record<string, { department: string; Pass: number; Others: number }> = {};
     records.forEach((r) => {
       const dept = r.department || 'General';
       if (!map[dept]) {
-        map[dept] = { department: dept, Pass: 0, Fail: 0, Withdrawn: 0, Other: 0 };
+        map[dept] = { department: dept, Pass: 0, Others: 0 };
       }
       const st = r.status?.trim().toLowerCase();
       if (st === 'pass' || st === 'completed') {
         map[dept].Pass++;
-      } else if (st === 'fail' || st === 'failed') {
-        map[dept].Fail++;
-      } else if (st === 'withdrawn') {
-        map[dept].Withdrawn++;
       } else {
-        map[dept].Other++;
+        map[dept].Others++;
       }
     });
     return Object.values(map);
   }, [records]);
 
-  // Chart 2: Status Breakdown for Pie Chart
-  const statusData = useMemo(() => {
+  // Pie chart counts
+  const statusPieData = useMemo(() => {
+    const policyRankEmployees = employeeComplianceList.filter(e => e.rankClass !== 'Other');
+    const compliedCount = policyRankEmployees.filter(e => e.isComplied === true).length;
+    const pendingCount = policyRankEmployees.filter(e => e.isComplied === false).length;
     return [
-      { name: 'Pass/Completed', value: metrics.completed, color: '#10B981' }, // Emerald-500
-      { name: 'Fail', value: metrics.failed, color: '#EF4444' }, // Red-500
-      { name: 'Withdrawn', value: metrics.withdrawn, color: '#F59E0B' }, // Amber-500
-      { name: 'Pending/Other', value: metrics.pending, color: '#6366F1' }, // Indigo-500
-    ].filter((item) => item.value > 0);
-  }, [metrics]);
-
-  // Chart 3: Timeline Completions (by Month of raw upload or custom date)
-  const timelineData = useMemo(() => {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const counts = Array(12).fill(0);
-
-    records.forEach((r) => {
-      const st = r.status?.trim().toLowerCase();
-      if (st === 'pass' || st === 'completed') {
-        // Look for custom date field, or fallback to uploadedAt timestamp
-        let dateStr = r.uploadedAt;
-        if (r.customFields) {
-          const dateKey = Object.keys(r.customFields).find((k) => k.toLowerCase().includes('date') || k.toLowerCase().includes('time'));
-          if (dateKey && typeof r.customFields[dateKey] === 'string') {
-            dateStr = r.customFields[dateKey];
-          }
-        }
-        try {
-          const date = new Date(dateStr);
-          if (!isNaN(date.getTime())) {
-            const m = date.getMonth();
-            counts[m]++;
-          }
-        } catch {
-          // ignore
-        }
-      }
-    });
-
-    return months.map((m, idx) => ({
-      name: m,
-      Completions: counts[idx],
-    }));
-  }, [records]);
-
-  // Staggered animation containers
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.05,
-      },
-    },
-  };
-
-  const itemVariants = {
-    hidden: { opacity: 0, y: 15 },
-    show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 100 } },
-  };
+      { name: 'Complied Officers', value: compliedCount, color: '#10B981' },
+      { name: 'Pending Compliance', value: pendingCount, color: '#F59E0B' },
+    ].filter(v => v.value > 0);
+  }, [employeeComplianceList]);
 
   return (
     <div className="space-y-6" id="dashboard-container">
-      {/* Metrics Cards Grid */}
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="show"
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
-      >
-        {/* Metric 1 */}
-        <motion.div
-          variants={itemVariants}
-          className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3.5"
-          id="metric-employees"
-        >
+      
+      {/* 4 Premium Metric Highlight Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        
+        {/* Card 1: Total Employees Profile Count */}
+        <div className="bg-white p-5 rounded-xl border border-slate-200/90 shadow-2xs flex items-center space-x-4">
           <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg shrink-0">
             <Users className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500">Total Employees</p>
-            <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mt-0.5">{metrics.uniqueEmployees}</h3>
-            <p className="text-[10px] text-slate-450 mt-0.5 truncate">Across {metrics.departments} departments</p>
+            <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500">Trained Personnel</p>
+            <h3 className="text-xl sm:text-2xl font-bold text-slate-950 mt-0.5">{rotationStats.uniqueEmployees}</h3>
+            <p className="text-[10px] text-slate-505 mt-1 truncate">
+              Across <span className="font-semibold text-indigo-600">{complianceStats.departmentSummaryCount}</span> active units
+            </p>
           </div>
-        </motion.div>
+        </div>
 
-        {/* Metric 2 */}
-        <motion.div
-          variants={itemVariants}
-          className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3.5"
-          id="metric-completed"
+        {/* Card 2: Interactive Total Training Activities (Unique Entries) - Clickable */}
+        <div 
+          onClick={() => setShowUniqueTrainingsModal(true)}
+          className="bg-white p-5 rounded-xl border border-slate-200/90 hover:border-indigo-400 hover:shadow-xs transition-all cursor-pointer flex items-center space-x-4 group"
+          title="Click to view full course catalog directory"
+          id="metric-course-inventories"
         >
-          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg shrink-0">
+          <div className="p-3 bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100 rounded-lg shrink-0 transition-colors">
+            <BookMarked className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              Unique Course Syllabus
+              <span className="bg-indigo-105 text-indigo-700 text-[8px] font-bold px-1.5 py-0.5 rounded animate-pulse">VIEW ALL</span>
+            </p>
+            <h3 className="text-xl sm:text-2xl font-bold text-slate-955 mt-0.5 group-hover:text-indigo-650 transition-colors flex items-center gap-1">
+              {uniqueTrainingsList.length}
+              <span className="text-slate-400 text-xs font-normal font-mono group-hover:translate-x-1 duration-150 inline-block">→</span>
+            </h3>
+            <p className="text-[10px] text-slate-500 mt-1 truncate">
+              Unique syllabus courses in dataset (Click)
+            </p>
+          </div>
+        </div>
+
+        {/* Card 3: Total number of training rotations passed */}
+        <div className="bg-white p-5 rounded-xl border border-slate-200/90 shadow-2xs flex items-center space-x-4">
+          <div className="p-3 bg-amber-50 text-amber-600 rounded-lg shrink-0">
+            <RotateCw className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500">Workforce Rotations Passed</p>
+            <h3 className="text-xl sm:text-2xl font-bold text-slate-950 mt-0.5">{rotationStats.totalPassedRotations}</h3>
+            <p className="text-[10px] text-slate-500 mt-1 truncate">
+              Avg of <span className="font-bold text-slate-800">{rotationStats.avgPassedPerEmployee}</span> rotations per worker
+            </p>
+          </div>
+        </div>
+
+        {/* Card 4: Executive Policy Compliance Rate (%) */}
+        <div className="bg-white p-5 rounded-xl border border-slate-200/90 shadow-2xs flex items-center space-x-4">
+          <div className="p-3 bg-teal-50 text-teal-600 rounded-lg shrink-0">
             <Award className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500">Completion Rate</p>
-            <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mt-0.5">{metrics.complianceRate}%</h3>
-            <p className="text-[10px] text-emerald-600 font-semibold mt-0.5 truncate">↑ {metrics.completed} courses done</p>
+            <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500">Overall Compliance Rate</p>
+            <h3 className="text-xl sm:text-2xl font-bold text-slate-955 mt-0.5">{complianceStats.rate}%</h3>
+            <p className="text-[10px] text-slate-501 mt-1 truncate">
+              <span className="font-medium text-emerald-600">{complianceStats.compliedCount}</span> of {complianceStats.totalWithPolicy} core rank officers complied
+            </p>
           </div>
-        </motion.div>
+        </div>
 
-        {/* Metric 3 */}
-        <motion.div
-          variants={itemVariants}
-          className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3.5"
-          id="metric-pending"
-        >
-          <div className="p-3 bg-amber-50 text-amber-600 rounded-lg shrink-0">
-            <Clock className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500">Other Records</p>
-            <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mt-0.5">{metrics.pending + metrics.failed + metrics.withdrawn}</h3>
-            <p className="text-[10px] text-slate-450 mt-0.5 truncate">{metrics.failed} failed, {metrics.withdrawn} withdrawn</p>
-          </div>
-        </motion.div>
+      </div>
 
-        {/* Metric 4 */}
-        <motion.div
-          variants={itemVariants}
-          className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3.5"
-          id="metric-hours"
-        >
-          <div className="p-3 bg-teal-50 text-teal-600 rounded-lg shrink-0">
-            <ShieldCheck className="w-5 h-5" />
+      {/* Category wise unique training activities display grid */}
+      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-3xs" id="category-distribution-panel">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-4">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
+              <FolderCheck className="w-4.5 h-4.5 text-indigo-500" />
+              Category-Wise Course Inventory Distribution
+            </h3>
+            <p className="text-[11px] text-slate-450">
+              Total compilation of unique individual training course syllabi categorized for compliance audit (Total: {uniqueTrainingsList.length})
+            </p>
           </div>
-          <div className="min-w-0">
-            <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500">Training Hours</p>
-            <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mt-0.5">{metrics.totalHours.toFixed(1)} h</h3>
-            <p className="text-[10px] text-slate-455 mt-0.5 truncate">Total conducted duration</p>
-          </div>
-        </motion.div>
-      </motion.div>
+          <span className="bg-indigo-50 text-indigo-705 px-2.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase self-start sm:self-auto border border-indigo-100">
+            Auditable Database
+          </span>
+        </div>
 
-      {/* Visual Analytics Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5" id="dashboard-graphics">
-        {/* Chart 1: Department Coverage Breakdown */}
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+          {[
+            { key: 'Fundamentals', displayName: 'Fundamentals', bg: 'bg-emerald-50/55', text: 'text-emerald-700', border: 'border-emerald-100', bar: 'bg-emerald-500' },
+            { key: 'CAT-A', displayName: 'Category A (CAT-A)', bg: 'bg-indigo-50/55', text: 'text-indigo-700', border: 'border-indigo-100', bar: 'bg-indigo-500' },
+            { key: 'CAT-B', displayName: 'Category B (CAT-B)', bg: 'bg-teal-50/55', text: 'text-teal-700', border: 'border-teal-100', bar: 'bg-teal-500' },
+            { key: 'CAT-C', displayName: 'Category C (CAT-C)', bg: 'bg-amber-50/55', text: 'text-amber-750', border: 'border-amber-100', bar: 'bg-amber-500' },
+            { key: 'CAT-D', displayName: 'Category D (CAT-D)', bg: 'bg-rose-50/55', text: 'text-rose-700', border: 'border-rose-100', bar: 'bg-rose-500' },
+          ].map((cat) => {
+            const count = categorySummary.counts[cat.key as keyof typeof categorySummary.counts] || 0;
+            const percentage = uniqueTrainingsList.length > 0 ? (count / uniqueTrainingsList.length) * 100 : 0;
+            return (
+              <div 
+                key={cat.key}
+                className={`${cat.bg} p-4 rounded-xl border ${cat.border} flex flex-col justify-between hover:shadow-xs duration-150 transition-all`}
+              >
+                <div>
+                  <span className="text-[10px] font-bold text-slate-450 uppercase tracking-wider">{cat.displayName}</span>
+                  <div className={`text-2xl font-black mt-1 font-mono ${cat.text}`}>
+                    {count.toString().padStart(2, '0')}
+                  </div>
+                  <p className="text-[9px] text-slate-400 mt-0.5 italic">Unique Course activities</p>
+                </div>
+                
+                {/* Micro Progress Indicator bar */}
+                <div className="mt-4">
+                  <div className="flex justify-between items-center text-[9px] text-slate-450 font-bold font-mono mb-1">
+                    <span>Syllabus share</span>
+                    <span>{Math.round(percentage)}%</span>
+                  </div>
+                  <div className="w-full bg-slate-200/60 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full ${cat.bar} rounded-full transition-all duration-500`} 
+                      style={{ width: `${percentage}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Graphical Chart Widgets Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        
+        {/* Department Success Distribution chart block */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-3xs lg:col-span-2">
           <h4 className="text-xs sm:text-sm font-bold text-slate-800 mb-3.5 flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-indigo-500" />
-            Training Records by Department
+            Active Department Passing Rates vs Other actions
           </h4>
           <div className="h-64">
             {deptData.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-slate-400 text-xs">
-                No record metrics to analyze. Try uploading an Excel file.
+              <div className="h-full flex items-center justify-center text-slate-400 text-xs font-mono">
+                No departmental action recorded.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={deptData} margin={{ top: 10, right: 10, left: -22, bottom: 5 }}>
+                <BarChart data={deptData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
                   <XAxis dataKey="department" stroke="#94A3B8" fontSize={10} tickLine={false} />
                   <YAxis stroke="#94A3B8" fontSize={10} tickLine={false} />
@@ -282,159 +445,180 @@ export default function Dashboard({ records, batches }: DashboardProps) {
                       backgroundColor: '#FFFFFF',
                       borderRadius: '8px',
                       border: '1px solid #E2E8F0',
-                      boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
                     }}
                   />
                   <Legend iconType="circle" wrapperStyle={{ fontSize: 10, paddingTop: 6 }} />
-                  <Bar dataKey="Pass" stackId="a" fill="#10B981" radius={[0, 0, 0, 0]} barSize={32} />
-                  <Bar dataKey="Fail" stackId="a" fill="#EF4444" barSize={32} />
-                  <Bar dataKey="Withdrawn" stackId="a" fill="#F59E0B" barSize={32} />
-                  <Bar dataKey="Other" stackId="a" fill="#6366F1" radius={[3, 3, 0, 0]} barSize={32} />
+                  <Bar dataKey="Pass" name="Completed / Passed" fill="#10B981" radius={[3, 3, 0, 0]} barSize={28} />
+                  <Bar dataKey="Others" name="Other Records (Fail/Withdrawn/Pending)" fill="#94A3B8" radius={[3, 3, 0, 0]} barSize={28} />
                 </BarChart>
               </ResponsiveContainer>
             )}
           </div>
         </div>
 
-        {/* Chart 2: Compliance Percentage Status Doughnut Chart */}
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-sm">
-          <h4 className="text-xs sm:text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
-            <FileCheck2 className="w-4 h-4 text-emerald-500" />
-            Compliance Status Summary
-          </h4>
-          <div className="h-48 relative">
-            {statusData.length === 0 ? (
+        {/* Manager/AM Policy compliance pie visualization widget */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-3xs flex flex-col justify-between">
+          <div>
+            <h4 className="text-xs sm:text-sm font-bold text-slate-800 mb-1 flex items-center gap-2">
+              <FileCheck2 className="w-4 h-4 text-emerald-500" />
+              Compliance Ledger Proportion
+            </h4>
+            <p className="text-[10px] text-slate-405">Ranks: Assistant Manager & Manager</p>
+          </div>
+
+          <div className="h-44 relative my-2">
+            {statusPieData.length === 0 ? (
               <div className="h-full flex items-center justify-center text-slate-400 text-xs">
-                No active records
+                No policy rank employee data found.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={statusData}
+                    data={statusPieData}
                     cx="50%"
                     cy="50%"
-                    innerRadius={50}
-                    outerRadius={70}
+                    innerRadius={48}
+                    outerRadius={65}
                     paddingAngle={3}
                     dataKey="value"
                   >
-                    {statusData.map((entry, index) => (
+                    {statusPieData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#FFFFFF',
-                      borderRadius: '8px',
-                      border: '1px solid #E2E8F0',
-                    }}
-                  />
+                  <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
             )}
-            {/* Center percentage label */}
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-xl font-bold text-slate-900">{metrics.complianceRate}%</span>
-              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Compliance</span>
+              <span className="text-xl font-black text-slate-900">{complianceStats.rate}%</span>
+              <span className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">Achieved</span>
             </div>
           </div>
-          {/* Custom Legends list */}
-          <div className="mt-3 flex justify-around">
-            {statusData.map((item) => (
-              <div key={item.name} className="flex flex-col items-center">
-                <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                  {item.name}
-                </span>
-                <span className="text-xs font-bold text-slate-900 mt-0.5">{item.value}</span>
-              </div>
-            ))}
+
+          {/* Key label maps */}
+          <div className="space-y-1.5 shrink-0 text-[11px] font-sans">
+            <div className="flex justify-between items-center bg-slate-50 p-1.5 rounded border border-slate-100">
+              <span className="text-slate-550 font-medium flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Complied Officers
+              </span>
+              <span className="font-bold text-slate-800">{complianceStats.compliedCount} office{complianceStats.compliedCount !== 1 ? 'rs' : ''}</span>
+            </div>
+            <div className="flex justify-between items-center bg-slate-50 p-1.5 rounded border border-slate-100">
+              <span className="text-slate-550 font-medium flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Pending Criteria
+              </span>
+              <span className="font-bold text-slate-800">{complianceStats.totalWithPolicy - complianceStats.compliedCount} office{complianceStats.totalWithPolicy - complianceStats.compliedCount !== 1 ? 'rs' : ''}</span>
+            </div>
           </div>
         </div>
+
       </div>
 
-      {/* Chart 3: Monthly Progress Activity Timeline */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5" id="dashboard-timeline-logs">
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2">
-          <h4 className="text-xs sm:text-sm font-bold text-slate-800 mb-3.5 flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-indigo-500" />
-            Training Complete Trend (2026 Monthly completions)
-          </h4>
-          <div className="h-52">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={timelineData} margin={{ top: 10, right: 10, left: -24, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                <XAxis dataKey="name" stroke="#94A3B8" fontSize={9} tickLine={false} />
-                <YAxis stroke="#94A3B8" fontSize={9} tickLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#FFFFFF',
-                    borderRadius: '8px',
-                    border: '1px solid #E2E8F0',
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="Completions"
-                  stroke="#4F46E5"
-                  strokeWidth={2}
-                  dot={{ r: 3.5, stroke: '#4F46E5', strokeWidth: 1.5, fill: '#FFFFFF' }}
-                  activeDot={{ r: 5 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Recent Upload Batches Column */}
-        <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
-          <h4 className="text-xs sm:text-sm font-bold text-slate-800 mb-3 flex items-center gap-2 shrink-0">
-            <FileCheck2 className="w-4 h-4 text-indigo-500" />
-            Recent File Uploads
-          </h4>
-          <div className="space-y-2.5 flex-1 overflow-y-auto pr-1">
-            {batches.length === 0 ? (
-              <div className="text-center text-slate-400 py-10 text-xs">
-                No upload history yet.
-              </div>
-            ) : (
-              batches.slice(0, 4).map((b) => (
-                <div
-                  key={b.id}
-                  className="p-2.5 bg-slate-50/70 rounded-lg border border-slate-200 flex flex-col justify-between"
-                >
-                  <div className="flex items-start justify-between">
-                    <span className="font-semibold text-xs text-slate-700 truncate max-w-[130px]" title={b.filename}>
-                      {b.filename}
-                    </span>
-                    <span
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                        b.status === 'Success'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : b.status === 'Completed with warnings'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
-                    >
-                      {b.status === 'Success' ? 'Success' : b.recordsCount === 0 ? 'Failed' : 'Warns'}
-                    </span>
+      {/* Unique Course Directory Catalog Dialog Modal */}
+      <AnimatePresence>
+        {showUniqueTrainingsModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-xs" id="course-directory-directory-modal">
+            <div className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl border border-slate-200 animate-in fade-in duration-200 flex flex-col max-h-[85vh]">
+              
+              {/* Header */}
+              <div className="bg-slate-950 px-6 py-5 flex items-center justify-between text-white shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <BookOpen className="w-5 h-5 text-indigo-450" />
+                  <div>
+                    <h4 className="font-bold text-sm tracking-tight text-white">Unique Course Directory Catalog</h4>
+                    <p className="text-[10px] text-slate-400 mt-0.5">List of unique courses parsed from test data uploaded</p>
                   </div>
-                  <div className="flex items-center justify-between mt-2 text-[10px] text-slate-400 font-medium">
-                    <span>{b.recordsCount} records</span>
-                    <span className="font-mono">{b.uploadedAt.substring(5, 16)}</span>
-                  </div>
-                  {b.remarks && (
-                    <div className="mt-1 text-[9px] text-slate-500 uppercase tracking-tight italic truncate" title={b.remarks}>
-                      {b.remarks}
-                    </div>
-                  )}
                 </div>
-              ))
-            )}
+                <button 
+                  onClick={() => setShowUniqueTrainingsModal(false)}
+                  className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Quick search & category filter toolbar inside catalog */}
+              <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center gap-2 shrink-0">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search course activities by title..."
+                    value={courseSearch}
+                    onChange={(e) => setCourseSearch(e.target.value)}
+                    className="pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs w-full focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-hidden font-sans"
+                  />
+                </div>
+
+                <select
+                  value={courseCategoryFilter}
+                  onChange={(e) => setCourseCategoryFilter(e.target.value)}
+                  className="bg-white border border-slate-200 py-1.5 px-3 rounded-lg text-xs font-sans text-slate-700 cursor-pointer focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
+                >
+                  <option value="All">All Categories</option>
+                  <option value="Fundamentals">Fundamentals</option>
+                  <option value="CAT-A">Category A (CAT-A)</option>
+                  <option value="CAT-B">Category B (CAT-B)</option>
+                  <option value="CAT-C">Category C (CAT-C)</option>
+                  <option value="CAT-D">Category D (CAT-D)</option>
+                  <option value="Other">Uncategorized / Other</option>
+                </select>
+              </div>
+
+              {/* List Table viewport */}
+              <div className="flex-1 overflow-y-auto p-4 animate-in slide-in-from-bottom-2 duration-200">
+                <table className="w-full text-left text-[11px] border-collapse">
+                  <thead className="bg-slate-100 text-slate-500 font-bold uppercase tracking-wider text-[9px] border-b border-slate-200">
+                    <tr>
+                      <th className="px-3 py-2 w-10 text-center">S.No</th>
+                      <th className="px-3 py-2">Training Activity / Title</th>
+                      <th className="px-3 py-2 w-32 text-center">Mapped Category</th>
+                      <th className="px-3 py-2 w-24 text-right">Completions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-701">
+                    {filteredUniqueCourses.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="text-center py-12 text-slate-450">
+                          <BookOpen className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                          No training courses match this search query.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredUniqueCourses.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/70 duration-100 divide-x divide-slate-100/40">
+                          <td className="px-3 py-2.5 text-center text-slate-400 font-mono font-bold">{idx + 1}</td>
+                          <td className="px-3 py-2.5 text-slate-900 font-semibold">{item.title}</td>
+                          <td className="px-3 py-2.5 text-center">
+                            <span className="bg-slate-50 text-slate-650 text-[9px] font-extrabold px-2 py-0.5 rounded border border-slate-150 font-mono uppercase tracking-wider">
+                              {getNormalizedCategory(item.category)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-600">{item.passedCount} pass{item.passedCount !== 1 ? 'es' : ''}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Footer view */}
+              <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center text-[10px] text-slate-500 shrink-0 font-mono">
+                <span>Showing {filteredUniqueCourses.length} of {uniqueTrainingsList.length} unique syllabus activities</span>
+                <button 
+                  onClick={() => setShowUniqueTrainingsModal(false)}
+                  className="bg-slate-900 hover:bg-slate-950 text-white font-bold px-4 py-1.5 rounded-lg cursor-pointer transition-colors text-xs"
+                >
+                  Close Directory
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }

@@ -37,6 +37,7 @@ import LoginForm from './components/LoginForm';
 import Dashboard from './components/Dashboard';
 import TrainingTable from './components/TrainingTable';
 import UploadModal from './components/UploadModal';
+import PolicyAuditor from './components/PolicyAuditor';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -49,7 +50,7 @@ export default function App() {
   const [batches, setBatches] = useState<UploadBatch[]>([]);
   const [customHeaders, setCustomHeaders] = useState<CustomHeader[]>([]);
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'records'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'records' | 'auditor'>('dashboard');
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
 
   // Success / Warning notification state
@@ -290,9 +291,9 @@ export default function App() {
           <aside className="hidden md:flex w-64 bg-slate-900 text-white flex-col shrink-0 border-r border-slate-800">
             <div className="p-5 flex items-center gap-3 border-b border-slate-800 shrink-0">
               <div className="w-8 h-8 bg-indigo-500 rounded flex items-center justify-center font-bold text-white text-sm">
-                TM
+                HP
               </div>
-              <span className="font-semibold tracking-tight text-white text-sm">TrainLogic Pro</span>
+              <span className="font-semibold tracking-tight text-white text-sm">HRD Training Portal</span>
             </div>
             
             <nav className="flex-1 py-4 flex flex-col gap-0.5">
@@ -320,6 +321,17 @@ export default function App() {
                 <Database className="w-4 h-4 mr-3 opacity-70" /> Training Records
               </button>
 
+              <button
+                onClick={() => setActiveTab('auditor')}
+                className={`flex items-center px-5 py-3 text-xs font-semibold transition-colors text-left cursor-pointer w-full ${
+                  activeTab === 'auditor'
+                    ? 'bg-indigo-600 text-white border-l-4 border-indigo-400 font-semibold'
+                    : 'text-slate-400 hover:bg-slate-855 hover:text-white'
+                }`}
+              >
+                <Award className="w-4 h-4 mr-3 opacity-70" /> Policy Auditor
+              </button>
+
               {userRole !== 'manager' && (
                 <button
                   onClick={() => setShowUploadModal(true)}
@@ -333,8 +345,8 @@ export default function App() {
               
               <button
                 onClick={() => {
-                  setActiveTab('dashboard');
-                  triggerNotification('Navigated to dashboard summary charts.', 'info');
+                  setActiveTab('auditor');
+                  triggerNotification('Navigated to training policy compliance auditor ledgers.', 'info');
                 }}
                 className="flex items-center px-5 py-3 text-xs font-semibold transition-colors text-left cursor-pointer w-full text-slate-400 hover:bg-slate-870 hover:text-white"
               >
@@ -356,15 +368,17 @@ export default function App() {
             <div className="p-4 border-t border-slate-800 shrink-0">
               <div className="flex items-center gap-3 p-2 rounded bg-slate-800/40 border border-slate-800/40">
                 <div className={`w-7 h-7 rounded-sm font-bold text-xs flex items-center justify-center ${userRole === 'manager' ? 'bg-indigo-900 text-indigo-200' : 'bg-slate-700 text-slate-300'}`}>
-                  {userRole === 'manager' ? 'M' : 'A'}
+                   {userRole === 'manager' ? 'M' : 'A'}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[11px] font-medium truncate text-white">
-                    {userRole === 'manager' ? 'Manager (amhrd)' : 'Admin User'}
+                    {userRole === 'manager' ? 'HRD Manager' : 'Administrator'}
                   </p>
-                  <p className="text-[9px] text-slate-500 truncate">
-                    {userRole === 'manager' ? 'amhrd@trainlogic.io' : (auth.currentUser?.email || 'admin@trainlogic.io')}
-                  </p>
+                  {auth.currentUser?.email ? (
+                    <p className="text-[9px] text-slate-500 truncate">
+                      {auth.currentUser.email}
+                    </p>
+                  ) : null}
                 </div>
                 <button
                   onClick={handleLogout}
@@ -430,6 +444,14 @@ export default function App() {
               >
                 Grid View
               </button>
+              <button
+                onClick={() => setActiveTab('auditor')}
+                className={`flex-1 py-2 text-center font-bold text-xs rounded-lg transition-colors ${
+                  activeTab === 'auditor' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-505 hover:bg-slate-100'
+                }`}
+              >
+                Auditor
+              </button>
             </div>
 
             {/* Scrollable interior viewport for active database components */}
@@ -446,7 +468,7 @@ export default function App() {
                   >
                     <Dashboard records={records} batches={batches} />
                   </motion.div>
-                ) : (
+                ) : activeTab === 'records' ? (
                   <motion.div
                     key="records-tab"
                     initial={{ opacity: 0, y: 10 }}
@@ -464,6 +486,15 @@ export default function App() {
                       onDeleteCustomHeader={handleDeleteCustomHeader}
                       userRole={userRole}
                     />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="auditor-tab"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                  >
+                    <PolicyAuditor records={records} />
                   </motion.div>
                 )}
               </AnimatePresence>
